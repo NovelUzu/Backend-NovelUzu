@@ -1,0 +1,7 @@
+# Env files
+.env*
+scripts/
+main
+app
+main.go
+.DS_Store
