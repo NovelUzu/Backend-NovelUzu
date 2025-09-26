@@ -12,7 +12,7 @@ CREATE TYPE subscription_status AS ENUM ('activa', 'cancelada', 'expirada');
 
 -- Tabla de usuarios
 CREATE TABLE users (
-    email VARCHAR(255) SERIAL PRIMARY KEY,
+    email VARCHAR(255) PRIMARY KEY,
     username VARCHAR(50) UNIQUE NOT NULL,
     password_hash VARCHAR(255) NOT NULL,
     role user_role DEFAULT 'usuario',

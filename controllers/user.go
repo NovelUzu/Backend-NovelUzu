@@ -1,346 +1,361 @@
 package controllers
 
 import (
-	"NovelUzu/constants/auth"
 	"NovelUzu/middleware"
 	models "NovelUzu/models/postgres"
+	"bytes"
+	"fmt"
+	"io"
+	"mime/multipart"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/golang-jwt/jwt/v5"
-	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
 )
 
-// @Summary Login user
-// @Description Authenticates a user and creates a session
-// @Tags auth
-// @Accept x-www-form-urlencoded
-// @Produce json
-// @Param email formData string true "User email"
-// @Param password formData string true "User password"
-// @Success 200 {object} object{message=string,token=string}
-// @Failure 400 {object} object{error=string}
-// @Failure 401 {object} object{error=string}
-// @Failure 500 {object} object{error=string}
-// @Router /login [post]
-func Login(db *gorm.DB) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		email := c.PostForm("email")
-		password := c.PostForm("password")
-
-		//Minimum input sanitizing
-		if strings.Trim(email, " ") == "" || strings.Trim(password, " ") == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Los parametros email y password son obligatorios"})
-			return
-		}
-
-		var user models.User
-		if err := db.Where("email = ?", email).First(&user).Error; err != nil {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "Usuario no encontrado: email invalido"})
-			return
-		}
-
-		if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(password)); err != nil {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "Contraseña invalida"})
-			return
-		}
-
-		// Generate JWT
-		token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-			auth.Email: user.Email,
-		})
-
-		secret := os.Getenv("KEY")
-		tokenString, err := token.SignedString([]byte(secret))
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Error al generar el JWT"})
-		}
-
-		c.JSON(http.StatusOK, gin.H{"message": "Inicio de sesión exitoso.", "token": tokenString})
-	}
-}
-
-// @Summary Log out a user
-// @Description Ends the user's session
-// @Tags auth
-// @Produce json
-// @Param Authorization header string true "Bearer JWT token"
-// @Success 200 {object} object{message=string}
-// @Failure 400 {object} object{error=string}
-// @Failure 500 {object} object{error=string}
-// @Router /auth/logout [delete]
-func Logout(c *gin.Context) {
-	//This serves no purpose with JWT so TODO rething
-	_, err := middleware.JWT_decoder(c)
-	if err != nil {
-		c.Abort()
-		return
-	}
-	c.JSON(http.StatusOK, gin.H{"mensaje": "Cierre de sesión exitoso"})
-}
-
-// @Summary Sign up a new user
-// @Description Creates a new user account
-// @Tags auth
-// @Accept x-www-form-urlencoded
-// @Produce json
-// @Param username formData string true "Username"
-// @Param email formData string true "Email"
-// @Param password formData string true "Password"
-// @Success 201 {object} object{message=string,user=object{username=string,email=string}}
-// @Failure 400 {object} object{error=string}
-// @Failure 409 {object} object{error=string}
-// @Failure 500 {object} object{error=string}
-// @Router /signup [post]
-func SignUp(db *gorm.DB) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		username := c.PostForm("username")
-		email := c.PostForm("email")
-		password := c.PostForm("password")
-
-		// Minimum input sanitizing
-		if strings.TrimSpace(username) == "" || strings.TrimSpace(email) == "" || strings.TrimSpace(password) == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Los parametros username, email y password son obligatorios"})
-			return
-		}
-
-		// Check if user already exists
-		var existingUser models.User
-		if err := db.Where("email = ? OR username = ?", email, username).First(&existingUser).Error; err == nil {
-			c.JSON(http.StatusConflict, gin.H{"error": "El usuario o email ya existe"})
-			return
-		}
-
-		// Hash password
-		hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Error al hashear la contraseña"})
-			return
-		}
-		// Create User
-		user := models.User{
-			Email:           email,
-			ProfileUsername: username,
-			PasswordHash:    string(hashedPassword),
-			CreatedAt:     time.Now(),
-		}
-
-		if err := db.Create(&user).Error; err != nil {
-			// Rollback game profile creation if user creation fails
-			// TODO: do it with a transaction?
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Error al crear el usuario"})
-			return
-		}
-
-		c.JSON(http.StatusCreated, gin.H{
-			"message": "Usuario creado exitosamente",
-			"user": gin.H{
-				"username": username,
-				"email":    email,
-			},
-		})
-	}
-}
-
 // @Summary Get all users
-// @Description Returns a list of all users with their usernames and icons
+// @Description Returns a list of all users with their basic information
 // @Tags users
 // @Produce json
 // @Param Authorization header string true "Bearer JWT token"
-// @Success 200 {array} object{username=string,icon=integer}
+// @Success 200 {array} object{username=string,email=string,role=string,status=string,avatar_url=string,created_at=string}
+// @Failure 401 {object} object{error=string}
 // @Failure 500 {object} object{error=string}
-// @Router /allusers [get]
+// @Router /user/allusers [get]
 func GetAllUsers(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		var users []models.User
-
-		// Preload GameProfile to get the icon
-		result := db.Preload("GameProfile").Find(&users)
-		if result.Error != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Error fetching users"})
+		// Verificar autenticación
+		_, err := middleware.JWT_decoder(c, db)
+		if err != nil {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Token inválido"})
 			return
 		}
 
-		// Create a slice of simplified user data
+		var users []models.User
+
+		// Obtener todos los usuarios
+		result := db.Find(&users)
+		if result.Error != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Error al obtener usuarios"})
+			return
+		}
+
+		// Crear un slice de datos simplificados de usuarios
 		simplifiedUsers := make([]gin.H, len(users))
 		for i, user := range users {
-			simplifiedUsers[i] = gin.H{
-				"username": user.ProfileUsername,
+			userInfo := gin.H{
+				"username":   user.ProfileUsername,
+				"email":      user.Email,
+				"role":       string(user.Role),
+				"status":     string(user.Status),
+				"created_at": user.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
 			}
+
+			// Agregar avatar_url solo si no es nil
+			if user.AvatarURL != nil {
+				userInfo["avatar_url"] = *user.AvatarURL
+			}
+
+			simplifiedUsers[i] = userInfo
 		}
 
 		c.JSON(http.StatusOK, simplifiedUsers)
 	}
 }
 
-// @Summary Update user information
-// @Description Updates the authenticated user's information
+// uploadToNextcloud sube un archivo a Nextcloud y retorna la URL pública
+func uploadToNextcloud(file multipart.File, filename string) (string, error) {
+	// Configuración de Nextcloud
+	nextcloudURL := "https://nextcloud.eslus.org/remote.php/dav/files/"
+	username := os.Getenv("NEXTCLOUD_USERNAME")
+	password := os.Getenv("NEXTCLOUD_PASSWORD")
+
+	if username == "" || password == "" {
+		return "", fmt.Errorf("credenciales de Nextcloud no configuradas")
+	}
+
+	// Generar nombre único para el archivo
+	ext := filepath.Ext(filename)
+	uniqueFilename := fmt.Sprintf("avatar_%d%s", time.Now().Unix(), ext)
+
+	// Primero crear el directorio avatars si no existe
+	avatarsDir := fmt.Sprintf("%s%s/avatars", nextcloudURL, username)
+
+	// Crear directorio avatars
+	req, err := http.NewRequest("MKCOL", avatarsDir, nil)
+	if err == nil {
+		req.SetBasicAuth(username, password)
+		client := &http.Client{Timeout: 10 * time.Second}
+		resp, _ := client.Do(req)
+		if resp != nil {
+			resp.Body.Close()
+		}
+	}
+
+	uploadPath := fmt.Sprintf("avatars/%s", uniqueFilename)
+	fullURL := fmt.Sprintf("%s%s/%s", nextcloudURL, username, uploadPath)
+
+	// Leer el contenido del archivo
+	fileBytes, err := io.ReadAll(file)
+	if err != nil {
+		return "", fmt.Errorf("error al leer archivo: %v", err)
+	}
+
+	// Crear request HTTP PUT para subir el archivo
+	req, err = http.NewRequest("PUT", fullURL, bytes.NewReader(fileBytes))
+	if err != nil {
+		return "", fmt.Errorf("error al crear request: %v", err)
+	}
+
+	// Configurar autenticación básica
+	req.SetBasicAuth(username, password)
+	req.Header.Set("Content-Type", "application/octet-stream")
+
+	// Realizar la subida
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("error de conexión con Nextcloud: %v", err)
+	}
+	defer resp.Body.Close()
+
+	// Leer el cuerpo de la respuesta para debug
+	body, _ := io.ReadAll(resp.Body)
+
+	if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("error en Nextcloud - Código: %d, URL: %s, Respuesta: %s", resp.StatusCode, fullURL, string(body))
+	}
+
+	// Crear enlace público para el archivo
+	publicURL, err := crearEnlacePublico(uploadPath, username, password)
+	if err != nil {
+		// Si falla la creación del enlace público, retornar la URL directa
+		fmt.Printf("Error al crear enlace público: %v\n", err)
+		directURL := fmt.Sprintf("https://nextcloud.eslus.org/remote.php/dav/files/%s/%s", username, uploadPath)
+		return directURL, nil
+	}
+
+	return publicURL, nil
+}
+
+// crearEnlacePublico crea un enlace público para un archivo en Nextcloud
+func crearEnlacePublico(ruta, username, password string) (string, error) {
+	nextcloudURL := "https://nextcloud.eslus.org"
+	url := nextcloudURL + "/ocs/v2.php/apps/files_sharing/api/v1/shares"
+	data := "path=/" + ruta + "&shareType=3&permissions=1"
+
+	req, err := http.NewRequest("POST", url, strings.NewReader(data))
+	if err != nil {
+		return "", fmt.Errorf("error al crear request: %v", err)
+	}
+
+	req.Header.Set("OCS-APIRequest", "true")
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.SetBasicAuth(username, password)
+
+	// Debug: imprimir la URL y datos que se están enviando
+	fmt.Printf("Creando enlace público - URL: %s, Data: %s\n", url, data)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("error de conexión: %v", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("error al leer respuesta: %v", err)
+	}
+
+	// Debug: imprimir la respuesta XML completa
+	fmt.Printf("Respuesta XML crearEnlacePublico (Status: %d): %s\n", resp.StatusCode, string(body))
+
+	// Trabajar directamente con XML - verificar si el status es ok
+	if strings.Contains(string(body), "<status>ok</status>") {
+		return extraerTokenDeXML(string(body))
+	} else {
+		// Extraer el mensaje de error del XML
+		messageStart := strings.Index(string(body), "<message>")
+		messageEnd := strings.Index(string(body), "</message>")
+		if messageStart != -1 && messageEnd != -1 && messageStart < messageEnd {
+			errorMsg := string(body)[messageStart+9 : messageEnd]
+			return "", fmt.Errorf("error en Nextcloud: %s", errorMsg)
+		}
+		return "", fmt.Errorf("error en respuesta XML de Nextcloud")
+	}
+}
+
+// extraerTokenDeXML extrae el token de compartición de una respuesta XML de Nextcloud
+func extraerTokenDeXML(xmlResponse string) (string, error) {
+	// Primero intentar extraer la URL completa que ya viene formateada
+	urlStart := strings.Index(xmlResponse, "<url>")
+	urlEnd := strings.Index(xmlResponse, "</url>")
+
+	if urlStart != -1 && urlEnd != -1 && urlStart < urlEnd {
+		url := xmlResponse[urlStart+5 : urlEnd]
+		return url, nil
+	}
+
+	// Si no encuentra URL, buscar el token para construir la URL manualmente
+	tokenStart := strings.Index(xmlResponse, "<token>")
+	tokenEnd := strings.Index(xmlResponse, "</token>")
+
+	if tokenStart == -1 || tokenEnd == -1 || tokenStart >= tokenEnd {
+		return "", fmt.Errorf("no se pudo extraer token ni URL de la respuesta XML")
+	}
+
+	token := xmlResponse[tokenStart+7 : tokenEnd]
+	publicURL := fmt.Sprintf("https://nextcloud.eslus.org/s/%s", token)
+	return publicURL, nil
+}
+
+// @Summary Actualizar perfil de usuario
+// @Description Actualiza la información del perfil del usuario incluyendo avatar
 // @Tags users
-// @Accept x-www-form-urlencoded
+// @Accept multipart/form-data
 // @Produce json
 // @Param Authorization header string true "Bearer JWT token"
-// @Param username formData string false "New username"
-// @Param email formData string false "New email"
-// @Param password formData string false "New password"
-// @Param icon formData string false "New icon number"
-// @Success 200 {object} object{message=string,token=string,user=object{username=string,email=string,icon=integer}}
+// @Param username formData string false "Nuevo nombre de usuario"
+// @Param bio formData string false "Biografía del usuario"
+// @Param birth_date formData string false "Fecha de nacimiento (YYYY-MM-DD)"
+// @Param country formData string false "País del usuario"
+// @Param avatar formData file false "Imagen de avatar (JPG, PNG)"
+// @Success 200 {object} object{message=string,user=object}
 // @Failure 400 {object} object{error=string}
 // @Failure 401 {object} object{error=string}
-// @Failure 404 {object} object{error=string}
-// @Failure 409 {object} object{error=string}
 // @Failure 500 {object} object{error=string}
-// @Router /auth/update [patch]
-// func UpdateUserInfo(db *gorm.DB) gin.HandlerFunc {
-// 	return func(c *gin.Context) {
-// 		// Get email from session
-// 		currentEmail, err := middleware.JWT_decoder(c)
-// 		if err != nil {
-// 			c.Abort()
-// 			return
-// 		}
+// @Router /user/update [put]
+func UpdateProfile(db *gorm.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		// Verificar autenticación
+		email, err := middleware.JWT_decoder(c, db)
+		if err != nil {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Token inválido"})
+			return
+		}
 
-// 		// Get update data from request
-// 		username := c.PostForm("username")
-// 		email := c.PostForm("email")
-// 		password := c.PostForm("password")
-// 		icon := c.PostForm("icon")
+		// Buscar usuario actual
+		var user models.User
+		if err := db.Where("email = ?", email).First(&user).Error; err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Usuario no encontrado"})
+			return
+		}
 
-// 		// Start a transaction
-// 		tx := db.Begin()
-// 		if tx.Error != nil {
-// 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to start transaction"})
-// 			return
-// 		}
+		// Crear mapa para actualizaciones
+		updates := make(map[string]interface{})
 
-// 		// Get current user
-// 		var user models.User
-// 		if err := tx.Where("email = ?", currentEmail).First(&user).Error; err != nil {
-// 			tx.Rollback()
-// 			c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
-// 			return
-// 		}
+		// Procesar campos de texto
+		if username := c.PostForm("username"); username != "" {
+			// Verificar que el username no esté en uso por otro usuario
+			var existingUser models.User
+			if err := db.Where("username = ? AND email != ?", username, email).First(&existingUser).Error; err == nil {
+				c.JSON(http.StatusConflict, gin.H{"error": "El nombre de usuario ya está en uso"})
+				return
+			}
+			updates["username"] = username
+		}
 
-// 		// Check if new username is already taken (if changing username)
-// 		if username != "" && username != user.ProfileUsername {
-// 			// Check if new username is already taken
-// 			var existingUser models.User
-// 			if err := tx.Where("profile_username = ? AND email != ?", username, currentEmail).First(&existingUser).Error; err == nil {
-// 				tx.Rollback()
-// 				c.JSON(http.StatusConflict, gin.H{"error": "Username already taken"})
-// 				return
-// 			}
-			
-// 			// With ON UPDATE CASCADE constraints properly set up, we can simply update the username
-// 			// in the game_profiles table, and all related records will be updated automatically
-			
-// 			// First, update the game profile's username (primary key)
-// 			// NOTE: with raw GORM, it can be problematic
-// 			if err := tx.Exec("UPDATE game_profiles SET username = ? WHERE username = ?", 
-// 							 username, user.ProfileUsername).Error; err != nil {
-// 				tx.Rollback()
-// 				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update game profile username"})
-// 				return
-// 			}
-			
-// 			// Then update the user's profile_username field
-// 			user.ProfileUsername = username
-			
-// 			// Save user changes
-// 			if err := tx.Save(&user).Error; err != nil {
-// 				tx.Rollback()
-// 				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update user"})
-// 				return
-// 			}
-			
-// 			// Update our local gameProfile variable to reflect the change
-// 			gameProfile.Username = username
-// 		}
+		if bio := c.PostForm("bio"); bio != "" {
+			updates["bio"] = bio
+		}
 
-// 		// Check if new email is already taken (if changing email)
-// 		if email != "" && email != currentEmail {
-// 			var existingUser models.User
-// 			if err := tx.Where("email = ?", email).First(&existingUser).Error; err == nil {
-// 				tx.Rollback()
-// 				c.JSON(http.StatusConflict, gin.H{"error": "Email already taken"})
-// 				return
-// 			}
-// 		}
+		if birthDate := c.PostForm("birth_date"); birthDate != "" {
+			parsedDate, err := time.Parse("2006-01-02", birthDate)
+			if err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "Formato de fecha inválido. Use YYYY-MM-DD"})
+				return
+			}
+			updates["birth_date"] = parsedDate
+		}
 
-// 		// Update password if provided
-// 		if password != "" {
-// 			hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
-// 			if err != nil {
-// 				tx.Rollback()
-// 				c.JSON(http.StatusInternalServerError, gin.H{"error": "Error hashing password"})
-// 				return
-// 			}
-// 			user.PasswordHash = string(hashedPassword)
-// 		}
+		if country := c.PostForm("country"); country != "" {
+			updates["country"] = country
+		}
 
-// 		var tokenString string
-// 		// Update email if provided
-// 		if email != "" && email != currentEmail {
-// 			user.Email = email
-// 			// Generate JWT
-// 			token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-// 				auth.Email: user.Email,
-// 			})
+		// Procesar archivo de avatar
+		file, header, err := c.Request.FormFile("avatar")
+		if err == nil {
+			defer file.Close()
 
-// 			secret := os.Getenv("KEY")
-// 			tokenString, err = token.SignedString([]byte(secret))
-// 			if err != nil {
-// 				c.JSON(http.StatusInternalServerError, gin.H{"error": "Error generating JWT"})
-// 			}
-// 		} else {
-// 			// NEW: better not return an empty string, even if the user didn't change his email
-// 			authHeader := c.GetHeader("Authorization")
-// 			tokenString = strings.TrimPrefix(authHeader, "Bearer ")
-// 		}
+			// Validar tipo de archivo
+			contentType := header.Header.Get("Content-Type")
+			if !strings.HasPrefix(contentType, "image/") {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "El archivo debe ser una imagen"})
+				return
+			}
 
-// 		// Update icon if provided
-// 		if icon != "" {
-// 			iconInt, err := strconv.Atoi(icon)
-// 			if err != nil {
-// 				tx.Rollback()
-// 				c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid icon value"})
-// 				return
-// 			}
-// 			gameProfile.UserIcon = iconInt
+			// Validar tamaño (max 5MB)
+			if header.Size > 5*1024*1024 {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "El archivo es demasiado grande (máximo 5MB)"})
+				return
+			}
 
-// 			// Save game profile changes for icon
-// 			if err := tx.Save(&gameProfile).Error; err != nil {
-// 				tx.Rollback()
-// 				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update game profile"})
-// 				return
-// 			}
-// 		}
+			// Intentar subir a Nextcloud
+			avatarURL, err := uploadToNextcloud(file, header.Filename)
+			if err != nil {
+				// Si falla la subida a Nextcloud, log el error pero continúa sin la imagen
+				fmt.Printf("Error al subir a Nextcloud: %v\n", err)
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Error al subir imagen. Verifique la configuración de Nextcloud"})
+				return
+			}
 
-// 		// Save user changes if we didn't already save them above
-// 		if err := tx.Save(&user).Error; err != nil {
-// 			tx.Rollback()
-// 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update user"})
-// 			return
-// 		}
+			updates["avatar_url"] = avatarURL
+		}
 
-// 		// Commit transaction
-// 		if err := tx.Commit().Error; err != nil {
-// 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to commit changes"})
-// 			return
-// 		}
+		// Si no hay actualizaciones, retornar error
+		if len(updates) == 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "No se proporcionaron campos para actualizar"})
+			return
+		}
 
-// 		// Return updated user info
-// 		c.JSON(http.StatusOK, gin.H{
-// 			"message": "User updated successfully",
-// 			"user": gin.H{
-// 				"username": user.ProfileUsername,
-// 				"email":    user.Email,
-// 				"icon":     gameProfile.UserIcon,
-// 			},
-// 			"token": tokenString,
-// 		})
-// 	}
-// }
+		// Actualizar timestamp
+		updates["updated_at"] = time.Now()
+
+		// Realizar actualización en la base de datos
+		if err := db.Model(&user).Updates(updates).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Error al actualizar perfil"})
+			return
+		}
+
+		// Buscar usuario actualizado para retornar
+		var updatedUser models.User
+		if err := db.Where("email = ?", email).First(&updatedUser).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Error al obtener usuario actualizado"})
+			return
+		}
+
+		// Preparar respuesta
+		userResponse := gin.H{
+			"email":          updatedUser.Email,
+			"username":       updatedUser.ProfileUsername,
+			"role":           string(updatedUser.Role),
+			"status":         string(updatedUser.Status),
+			"email_verified": updatedUser.EmailVerified,
+			"created_at":     updatedUser.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
+			"updated_at":     updatedUser.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"),
+		}
+
+		// Agregar campos opcionales
+		if updatedUser.AvatarURL != nil {
+			userResponse["avatar_url"] = *updatedUser.AvatarURL
+		}
+		if updatedUser.Bio != nil {
+			userResponse["bio"] = *updatedUser.Bio
+		}
+		if updatedUser.BirthDate != nil {
+			userResponse["birth_date"] = updatedUser.BirthDate.Format("2006-01-02")
+		}
+		if updatedUser.Country != nil {
+			userResponse["country"] = *updatedUser.Country
+		}
+
+		c.JSON(http.StatusOK, gin.H{
+			"message": "Perfil actualizado exitosamente",
+			"user":    userResponse,
+		})
+	}
+}
