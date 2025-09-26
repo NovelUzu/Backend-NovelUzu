@@ -15,13 +15,13 @@ import (
 	"gorm.io/gorm"
 )
 
-// @Summary Login user
-// @Description Authenticates a user and creates a session
+// @Summary Iniciar sesión
+// @Description Autentica un usuario y crea una sesión
 // @Tags auth
 // @Accept x-www-form-urlencoded
 // @Produce json
-// @Param email formData string true "User email"
-// @Param password formData string true "User password"
+// @Param email formData string true "Correo electrónico del usuario"
+// @Param password formData string true "Contraseña del usuario"
 // @Success 200 {object} object{message=string,token=string,user=object{email=string,username=string,role=string,status=string,avatar_url=string,bio=string,birth_date=string,country=string,email_verified=boolean,last_login=string,created_at=string,updated_at=string}}
 // @Failure 400 {object} object{error=string}
 // @Failure 401 {object} object{error=string}
@@ -102,8 +102,8 @@ func Login(db *gorm.DB) gin.HandlerFunc {
 	}
 }
 
-// @Summary Log out a user
-// @Description Ends the user's session
+// @Summary Cerrar sesión
+// @Description Termina la sesión del usuario
 // @Tags auth
 // @Produce json
 // @Param Authorization header string true "Bearer JWT token"
@@ -188,14 +188,14 @@ func VerifyTokenAndGetUser(db *gorm.DB) gin.HandlerFunc {
 	}
 }
 
-// @Summary Sign up a new user
-// @Description Creates a new user account
+// @Summary Registrar nuevo usuario
+// @Description Crea una nueva cuenta de usuario
 // @Tags auth
 // @Accept x-www-form-urlencoded
 // @Produce json
-// @Param username formData string true "Username"
-// @Param email formData string true "Email"
-// @Param password formData string true "Password"
+// @Param username formData string true "Nombre de usuario"
+// @Param email formData string true "Correo electrónico"
+// @Param password formData string true "Contraseña"
 // @Success 201 {object} object{message=string,user=object{username=string,email=string}}
 // @Failure 400 {object} object{error=string}
 // @Failure 409 {object} object{error=string}
