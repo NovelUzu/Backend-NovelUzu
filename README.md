@@ -1,5 +1,23 @@
 # Backend de NovelUzu
 
+<div align="center">
+  <p>Backend para plataforma de escritores y lectores de novelas web con sistema de publicación, descubrimiento y lectura en línea.</p>
+  
+  <p>
+    <img src="https://img.shields.io/badge/Go-1.24-00ADD8?logo=go" alt="Go" />
+    <img src="https://img.shields.io/badge/Gin-1.10-00ADD8?logo=go" alt="Gin" />
+    <img src="https://img.shields.io/badge/PostgreSQL-16.9-336791?logo=postgresql" alt="PostgreSQL" />
+    <img src="https://img.shields.io/badge/NextCloud-0082C9?logo=nextcloud" alt="NextCloud" />
+    <img src="https://img.shields.io/badge/OpenNebula-6.10-C12D87?logo=opennebula" alt="OpenNebula" />
+  </p>
+  
+  <p>
+    <a href="#características">Características</a> •
+    <a href="#despliegue">Despliegue</a> •
+    <a href="#uso">Uso</a>
+  </p>
+</div>
+
 ## Dependencias principales
 
 go version 1.24
@@ -106,7 +124,7 @@ swag init --output config/swagger
 - Logs estructurados con journalctl
 - Arranque automático del sistema
 
-## Uso/Ejemplos
+## Uso/Ejemplos {#uso}
 
 #### Documentación Swagger del servidor de desarrollo
 
