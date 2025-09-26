@@ -1,37 +1,37 @@
-# NovelUzu's backend
+# Backend de NovelUzu
 
-## Core dependencies
+## Dependencias principales
 
 go version 1.24
 gin-gonic (https://github.com/gin-gonic/gin) version 1.10
 socket.io (github.com/zishang520/socket.io/v2) version 2.3.8
 
-The remaining dependencies can be found on go.mod
+Las dependencias restantes se pueden encontrar en go.mod
 
-#### Relevant external versions
+#### Versiones externas relevantes
 
 postgres version 16.9 (base de datos principal)
 nextcloud (almacenamiento de imágenes)
-go server hosted on OpenNebula 6.10
+servidor go alojado en OpenNebula 6.10
 
-## Infrastructure
+## Infraestructura
 
 - **Base de datos**: PostgreSQL 16.9 para almacenamiento de datos de usuarios y aplicación
 - **Almacenamiento de imágenes**: Nextcloud para gestión y almacenamiento de avatares y archivos multimedia
 - **Servicio del sistema**: Configurado con systemd para reinicio automático y gestión del backend
 
-## Deployment
+## Despliegue
 
 ### Desarrollo local
 
-To deploy this project run:
+Para desplegar este proyecto ejecuta:
 
 ```
 go mod tidy
 go run main.go
 
 ```
-Or compile it as a binary:
+O compílalo como binario:
 ```
 go mod tidy
 go build main.go
@@ -81,12 +81,12 @@ sudo systemctl enable backend-noveluzu
 sudo journalctl -u backend-noveluzu -f
 ```
 
-generate documentation:
+Generar documentación:
 ```
 swag init --output config/swagger
 ```
 
-## Features
+## Características
 
 ### Almacenamiento de imágenes con Nextcloud
 - Integración completa con Nextcloud para subida y gestión de avatares
@@ -105,16 +105,17 @@ swag init --output config/swagger
 - Gestión centralizada del backend
 - Logs estructurados con journalctl
 - Arranque automático del sistema
-## Usage/Examples
 
-#### Development server swagger docs
+## Uso/Ejemplos
+
+#### Documentación Swagger del servidor de desarrollo
 
 ~~~ copy
 
 http://localhost:8080/swagger/index.html#/
 ~~~
 
-#### Production server swagger docs
+#### Documentación Swagger del servidor de producción
 
 ~~~ copy
 

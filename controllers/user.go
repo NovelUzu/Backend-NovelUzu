@@ -71,11 +71,12 @@ func GetAllUsers(db *gorm.DB) gin.HandlerFunc {
 // uploadToNextcloud sube un archivo a Nextcloud y retorna la URL pública
 func uploadToNextcloud(file multipart.File, filename string) (string, error) {
 	// Configuración de Nextcloud
-	nextcloudURL := "https://nextcloud.eslus.org/remote.php/dav/files/"
+	nextcloudBaseURL := os.Getenv("NEXTCLOUD_BASE_URL")
+	nextcloudURL := nextcloudBaseURL + "/remote.php/dav/files/"
 	username := os.Getenv("NEXTCLOUD_USERNAME")
 	password := os.Getenv("NEXTCLOUD_PASSWORD")
 
-	if username == "" || password == "" {
+	if username == "" || password == "" || nextcloudBaseURL == "" {
 		return "", fmt.Errorf("credenciales de Nextcloud no configuradas")
 	}
 
@@ -136,7 +137,13 @@ func uploadToNextcloud(file multipart.File, filename string) (string, error) {
 	if err != nil {
 		// Si falla la creación del enlace público, retornar la URL directa
 		fmt.Printf("Error al crear enlace público: %v\n", err)
-		directURL := fmt.Sprintf("https://nextcloud.eslus.org/remote.php/dav/files/%s/%s", username, uploadPath)
+
+		nextcloudBaseURL := os.Getenv("NEXTCLOUD_BASE_URL")
+		if nextcloudBaseURL == "" {
+			nextcloudBaseURL = "https://nextcloud.eslus.org"
+		}
+
+		directURL := fmt.Sprintf("%s/remote.php/dav/files/%s/%s", nextcloudBaseURL, username, uploadPath)
 		return directURL, nil
 	}
 
@@ -145,8 +152,12 @@ func uploadToNextcloud(file multipart.File, filename string) (string, error) {
 
 // crearEnlacePublico crea un enlace público para un archivo en Nextcloud
 func crearEnlacePublico(ruta, username, password string) (string, error) {
-	nextcloudURL := "https://nextcloud.eslus.org"
-	url := nextcloudURL + "/ocs/v2.php/apps/files_sharing/api/v1/shares"
+	nextcloudBaseURL := os.Getenv("NEXTCLOUD_BASE_URL")
+	if nextcloudBaseURL == "" {
+		nextcloudBaseURL = "https://nextcloud.eslus.org" // fallback por defecto
+	}
+
+	url := nextcloudBaseURL + "/ocs/v2.php/apps/files_sharing/api/v1/shares"
 	data := "path=/" + ruta + "&shareType=3&permissions=1"
 
 	req, err := http.NewRequest("POST", url, strings.NewReader(data))
@@ -210,7 +221,13 @@ func extraerTokenDeXML(xmlResponse string) (string, error) {
 	}
 
 	token := xmlResponse[tokenStart+7 : tokenEnd]
-	publicURL := fmt.Sprintf("https://nextcloud.eslus.org/s/%s", token)
+
+	nextcloudBaseURL := os.Getenv("NEXTCLOUD_BASE_URL")
+	if nextcloudBaseURL == "" {
+		nextcloudBaseURL = "https://nextcloud.eslus.org" // fallback por defecto
+	}
+
+	publicURL := fmt.Sprintf("%s/s/%s", nextcloudBaseURL, token)
 	return publicURL, nil
 }
 
