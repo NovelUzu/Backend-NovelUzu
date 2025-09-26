@@ -14,11 +14,6 @@ import (
 
 // SetupRoutes configures all API routes
 func SetupRoutes(router *gin.Engine, db *gorm.DB) {
-	// Create SyncManager instance
-	// syncManager := sync.NewSyncManager(redisClient, db)
-
-	// Create controllers
-	// lobbyController := &controllers.LobbyController{DB: db, RedisClient: redisClient, SyncManager: syncManager}
 
 	// utils global
 	router.Use(utils.ErrorHandler())
@@ -46,5 +41,7 @@ func SetupRoutes(router *gin.Engine, db *gorm.DB) {
 	{
 		user.GET("/allusers", controllers.GetAllUsers(db))
 		user.PUT("/update", controllers.UpdateProfile(db))
+		user.PUT("/change-password", controllers.ChangePassword(db))
+		user.DELETE("/delete-account", controllers.DeleteAccount(db))
 	}
 }

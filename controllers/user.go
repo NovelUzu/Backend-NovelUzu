@@ -14,11 +14,12 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
 )
 
-// @Summary Get all users
-// @Description Returns a list of all users with their basic information
+// @Summary Obtener todos los usuarios
+// @Description Retorna una lista de todos los usuarios con su información básica
 // @Tags users
 // @Produce json
 // @Param Authorization header string true "Bearer JWT token"
@@ -356,6 +357,142 @@ func UpdateProfile(db *gorm.DB) gin.HandlerFunc {
 		c.JSON(http.StatusOK, gin.H{
 			"message": "Perfil actualizado exitosamente",
 			"user":    userResponse,
+		})
+	}
+}
+
+// @Summary Cambiar contraseña del usuario
+// @Description Permite cambiar la contraseña del usuario después de verificar la contraseña actual
+// @Tags users
+// @Accept x-www-form-urlencoded
+// @Produce json
+// @Param Authorization header string true "Bearer JWT token"
+// @Param current_password formData string true "Contraseña actual"
+// @Param new_password formData string true "Nueva contraseña"
+// @Success 200 {object} object{message=string}
+// @Failure 400 {object} object{error=string}
+// @Failure 401 {object} object{error=string}
+// @Failure 403 {object} object{error=string}
+// @Failure 404 {object} object{error=string}
+// @Failure 500 {object} object{error=string}
+// @Router /user/change-password [put]
+func ChangePassword(db *gorm.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		// Verificar autenticación
+		email, err := middleware.JWT_decoder(c, db)
+		if err != nil {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Token inválido"})
+			return
+		}
+
+		// Obtener parámetros
+		currentPassword := c.PostForm("current_password")
+		newPassword := c.PostForm("new_password")
+
+		// Validar que se proporcionaron ambos campos
+		if currentPassword == "" || newPassword == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "current_password y new_password son obligatorios"})
+			return
+		}
+
+		// Validar longitud de nueva contraseña
+		if len(newPassword) < 6 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "La nueva contraseña debe tener al menos 6 caracteres"})
+			return
+		}
+
+		// Buscar usuario actual
+		var user models.User
+		if err := db.Where("email = ?", email).First(&user).Error; err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Usuario no encontrado"})
+			return
+		}
+
+		// Verificar contraseña actual
+		if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(currentPassword)); err != nil {
+			c.JSON(http.StatusForbidden, gin.H{"error": "La contraseña actual es incorrecta"})
+			return
+		}
+
+		// Verificar que la nueva contraseña sea diferente a la actual
+		if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(newPassword)); err == nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "La nueva contraseña debe ser diferente a la actual"})
+			return
+		}
+
+		// Hashear nueva contraseña
+		hashedPassword, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Error al procesar la nueva contraseña"})
+			return
+		}
+
+		// Actualizar contraseña en la base de datos
+		if err := db.Model(&user).Updates(map[string]interface{}{
+			"password_hash": string(hashedPassword),
+			"updated_at":    time.Now(),
+		}).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Error al actualizar la contraseña"})
+			return
+		}
+
+		c.JSON(http.StatusOK, gin.H{
+			"message": "Contraseña cambiada exitosamente",
+		})
+	}
+}
+
+// @Summary Eliminar cuenta de usuario
+// @Description Elimina permanentemente la cuenta del usuario después de verificar la contraseña
+// @Tags users
+// @Accept x-www-form-urlencoded
+// @Produce json
+// @Param Authorization header string true "Bearer JWT token"
+// @Param password formData string true "Contraseña actual para confirmar eliminación"
+// @Success 200 {object} object{message=string}
+// @Failure 400 {object} object{error=string}
+// @Failure 401 {object} object{error=string}
+// @Failure 403 {object} object{error=string}
+// @Failure 404 {object} object{error=string}
+// @Failure 500 {object} object{error=string}
+// @Router /user/delete-account [delete]
+func DeleteAccount(db *gorm.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		// Verificar autenticación
+		email, err := middleware.JWT_decoder(c, db)
+		if err != nil {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Token inválido"})
+			return
+		}
+
+		// Obtener contraseña de confirmación
+		password := c.PostForm("password")
+		if password == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "La contraseña es obligatoria para confirmar la eliminación"})
+			return
+		}
+
+		// Buscar usuario actual
+		var user models.User
+		if err := db.Where("email = ?", email).First(&user).Error; err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Usuario no encontrado"})
+			return
+		}
+
+		// Verificar contraseña actual
+		if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(password)); err != nil {
+			c.JSON(http.StatusForbidden, gin.H{"error": "Contraseña incorrecta"})
+			return
+		}
+
+		// Eliminar el usuario de la base de datos
+		if err := db.Delete(&user).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Error al eliminar la cuenta"})
+			return
+		}
+
+		c.JSON(http.StatusOK, gin.H{
+			"message": "Cuenta eliminada exitosamente",
 		})
 	}
 }
